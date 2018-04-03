@@ -24,7 +24,7 @@ module.exports = socket => {
 
 		setStatus(statusCode) {
 			if (this.headersSent) {
-				return socket.emit('error', new Error('Headers were sent'));
+				throw new Error('Headers were sent');
 			}
 			console.log('[SET STATUS]', statusCode);
 			this._statusCode = statusCode;
