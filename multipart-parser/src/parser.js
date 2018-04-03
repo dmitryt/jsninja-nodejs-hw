@@ -1,8 +1,14 @@
+const path = require('path');
+const { createWriteStream, existsSync, mkdir } = require('fs');
 const { Writable, Readable } = require('stream');
 
 const EOL = '\r\n';
 const CONTENT_DELIMITER = '\r\n\r\n';
 const MPART_CONTENT_TYPE = 'multipart/form-data';
+const TMP_FILES_STORAGE_PATH = path.resolve(process.cwd(), '.tmp');
+if (!existsSync(TMP_FILES_STORAGE_PATH)) {
+	mkdir(TMP_FILES_STORAGE_PATH);
+}
 
 function parseRequestContentType(headers = {}) {
 	const [name, meta = ''] = (headers['content-type'] || '').split('; ');
@@ -47,15 +53,24 @@ class Parser extends Writable {
 
 	_parseField(chunk) {
 		class FileStream extends Readable {
-			constructor(options) {
+			constructor(options, filename) {
 				super(options);
 				this.bytesRead = 0;
+				const filepath = path.resolve(TMP_FILES_STORAGE_PATH, `${filename}_${new Date().getTime()}`);
+				this.fsStream = createWriteStream(filepath);
 			}
 
 			_read(size) {
-				this.push(fieldValue.slice(this.bytesRead, this.bytesRead + size));
-				this.bytesRead += size;
+				const chunk = fieldValue.slice(this.bytesRead, this.bytesRead + size);
+				this.fsStream.write(chunk, err => {
+					if (err) {
+						return this.emit('error', err);
+					}
+					this.bytesRead += size;
+					this.push(chunk);
+				});
 				if (this.bytesRead >= fieldValue.length) {
+					this.fsStream.end();
 					this.push(null);
 				}
 			}
@@ -64,7 +79,7 @@ class Parser extends Writable {
 		const { fieldHeaders = {}, fieldValue } = parseContentChunk(chunk);
 		const meta = fieldHeaders['Content-Disposition'];
 		if (fieldHeaders['Content-Type']) { // It's supposed to be a file
-			this.emit('file', meta.name, new FileStream(), meta.filename, fieldHeaders['Content-Type'])
+			this.emit('file', meta.name, new FileStream({}, meta.filename), meta.filename, fieldHeaders['Content-Type'])
 		} else { // otherwise we parse it as usual field
 			this.emit('field', meta.name, fieldValue);
 		}
